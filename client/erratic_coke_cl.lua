@@ -1,13 +1,36 @@
-ESX = nil
+QBCore = nil
+local QBCore = exports['qb-core']:GetCoreObject()
 
-Citizen.CreateThread(function()
-    while ESX == nil do
-        TriggerEvent('esx:getSharedObject', function(obj) ESX = obj end)
-        Citizen.Wait(0)
+-- Setup ESX Core
+Citizen.CreateThread(function() 
+    while true do
+        Citizen.Wait(10)
+        if QBCore == nil then
+            TriggerEvent("QBCore:GetObject", function(obj) QBCore = obj end)    
+            Citizen.Wait(200)
+        end
     end
-
-ESX.PlayerData = ESX.GetPlayerData()
 end)
+-- Take Player Data After Player Loadout
+local isLoggedIn = false 
+
+RegisterNetEvent('QBCore:Client:OnPlayerLoaded')
+AddEventHandler('QBCore:Client:OnPlayerLoaded', function()
+    isLoggedIn = true
+end)
+
+Citizen.CreateThread(function() 
+    while true do
+		Citizen.Wait(30 * 60000)
+		print('Coke Table')
+		TriggerServerEvent('coke:updateTable', false)
+	end
+end)
+
+local itemsTable = {
+	'coke_brick',
+	'cokeblueprint',
+}
 
 local inUse = false
 local process 
@@ -29,20 +52,26 @@ local planehash
 local driveHangar
 local blip
 local isProcessing = false
+local player
+local started = false
+
+-- Gets coords
 
 Citizen.CreateThread(function()
-	while ESX == nil do TriggerEvent('esx:getSharedObject', function(obj) ESX = obj end) Wait(0) end
-    ESX.TriggerServerCallback('coke:processcoords', function(servercoords)
+	while QBCore == nil do TriggerEvent("QBCore:GetObject", function(obj) QBCore = obj end)   Wait(0) end
+    QBCore.Functions.TriggerCallback('coke:processcoords', function(servercoords)
         process = servercoords
 	end)
 end)
 
 Citizen.CreateThread(function()
-	while ESX == nil do TriggerEvent('esx:getSharedObject', function(obj) ESX = obj end) Wait(0) end
-    ESX.TriggerServerCallback('coke:startcoords', function(servercoords)
+	while QBCore == nil do TriggerEvent("QBCore:GetObject", function(obj) QBCore = obj end) Wait(0) end
+    QBCore.Functions.TriggerCallback('coke:startcoords', function(servercoords)
         coord = servercoords
 	end)
 end)
+
+-- Starting coke run
 
 Citizen.CreateThread(function()
 	local sleep
@@ -54,14 +83,17 @@ Citizen.CreateThread(function()
 		local player = GetPlayerPed(-1)
 		local playercoords = GetEntityCoords(player)
 		local dist = #(vector3(playercoords.x, playercoords.y, playercoords.z)-vector3(coord.x, coord.y, coord.z))
-		if not inUse then
+		if not started then
 			if dist <= 1 then
 				sleep = 5
-				DrawText3Ds(coord.x, coord.y, coord.z, _U'press_start')			
+				DrawText3Ds(coord.x, coord.y, coord.z, '[~g~E~w~] - Start Coke Run [~r~$5,000~w~]')		
 				if IsControlJustPressed(1, 51) then
-					ESX.TriggerServerCallback('coke:pay', function(success)
+					QBCore.Functions.TriggerCallback('coke:pay', function(success)
 						if success then
 							main()
+							starter = true
+						else
+							TriggerEvent('QBCore:Notify', "Not enough money")
 						end
 					end)
 				end
@@ -70,7 +102,7 @@ Citizen.CreateThread(function()
 			end
 		elseif dist <= 3 and inUse then
 			sleep = 5
-			DrawText3Ds(coord.x, coord.y, coord.z, _U'unavailable')
+			DrawText3Ds(coord.x, coord.y, coord.z '[~r~Unavailable~w~]')	
 		else
 			sleep = 3000
 		end
@@ -83,35 +115,17 @@ AddEventHandler('coke:syncTable', function(bool)
     inUse = bool
 end)
 
-RegisterNetEvent('coke:onUse')
-AddEventHandler('coke:onUse', function(source)
-	if Config.useMythic then
-		exports['mythic_notify']:DoLongHudText('inform', _U'coke_use')
-	end
-	local crackhead = GetPlayerPed(-1)
-	SetPedArmour(crackhead, 30)
-	SetTimecycleModifier("DRUG_gas_huffin")
-	Citizen.Wait(60000)
-	DoScreenFadeOut(1000)
-	Citizen.Wait(1000)
-	DoScreenFadeIn(2000)
-	if Config.useMythic then
-		exports['mythic_notify']:DoLongHudText('inform', _U'coke_off')
-	end
-	SetPedArmour(crackhead, 0)
-	ClearTimecycleModifier()
-end)
 
 function main()
-	local player = GetPlayerPed(-1)
-	SetEntityCoords(player, coord.x-0.1,coord.y-0.1,coord.z-1, 0.0,0.0,0.0, false)
-	SetEntityHeading(player, 330.38)
-	playAnim("timetable@jimmy@doorknock@", "knockdoor_idle", 3000)
-	Citizen.Wait(2000)
 	TriggerServerEvent('coke:updateTable', true)
-	if Config.useMythic then
-		exports['mythic_notify']:DoLongHudText('inform', _U'go_airfield')
-	end
+	player = GetPlayerPed(-1)
+	FreezeEntityPosition(player, true)
+	SetEntityCoords(player, coord.x-0.1,coord.y-0.1,coord.z-1, 0.0,0.0,0.0, false)
+	SetEntityHeading(player, Config.doorHeading)
+	playAnim("timetable@jimmy@doorknock@", "knockdoor_idle", 3000)
+	Citizen.Wait(3000)
+	FreezeEntityPosition(player, false)
+	QBCore.Functions.Notify("Head to the airfield!", "primary")
 	rand = math.random(1,#Config.locations)
 	location = Config.locations[rand]
 	blip = AddBlipForCoord(location.fuel.x,location.fuel.y,location.fuel.z)
@@ -123,7 +137,10 @@ function main()
 			local player = GetPlayerPed(-1)
 			playerpos = GetEntityCoords(player)
 			local disttocoord = #(vector3(location.fuel.x,location.fuel.y,location.fuel.z)-vector3(playerpos.x,playerpos.y,playerpos.z))
-			if disttocoord <= 300 then
+			if disttocoord <= 100 and not Config.landPlane then
+				planeGround()
+				enroute = false
+			elseif disttocoord <= 300 and Config.landPlane then
 				planeFly()
 				enroute = false
 			else
@@ -134,8 +151,21 @@ function main()
 	end)
 end
 
+function planeGround()
+	local planehash = GetHashKey("dodo")
+	RequestModel(planehash)
+	while not HasModelLoaded(planehash) do
+		Citizen.Wait(0)
+	end
+	airplane = CreateVehicle(planehash, location.stationary.x,location.stationary.y,location.stationary.z, location.stationary.h, true, true)
+	FreezeEntityPosition(airplane, true)
+	SetVehicleDoorsLocked(airplane, 2)
+	QBCore.Functions.Notify("You need fuel..", "error")
+	fuel(location.fuel.x,location.fuel.y,location.fuel.z)
+end
+
 function planeFly()
-	local pilothash = GetHashKey("s_m_m_pilot_02")
+	local pilothash = GetHashKey(Config.pilotPed)
     RequestModel(pilothash)
     while not HasModelLoaded(pilothash) do
         Citizen.Wait(0)
@@ -145,9 +175,7 @@ function planeFly()
 	while not HasModelLoaded(planehash) do
 		Citizen.Wait(0)
 	end
-	if Config.useMythic then
-		exports['mythic_notify']:DoLongHudText('inform', _U'wait_plane')
-	end
+	QBCore.Functions.Notify("Wait for the plane..", "primary")
 	airplane = CreateVehicle(planehash, location.plane.x,location.plane.y,location.plane.z, location.plane.h, true, true)
 
     SetEntityDynamic(airplane, true)
@@ -239,9 +267,6 @@ function parkHangar()
         	Citizen.Wait(1000)
         	TaskLeaveVehicle(pilot, airplane, 0)
         	Citizen.Wait(2000)
-        	if Config.useMythic then
-        		exports['mythic_notify']:DoLongHudText('inform', _U'no_fuel')
-        	end
         	TaskTurnPedToFaceEntity(pilot, player, 5000)
         	fuel(location.fuel.x,location.fuel.y,location.fuel.z)
         	playAnimPed("anim@mp_player_intincarsalutestd@ds@", "idle_a", 5000)
@@ -259,6 +284,8 @@ function fuel(x,y,z)
 	while not HasModelLoaded(prop) do
 		Citizen.Wait(0)
 	end
+	RemoveBlip(blip)
+	SetBlipRoute(blip, false)
 	jerrycan = GetHashKey("WEAPON_PETROLCAN")
 	local fuelSpawn = CreateObject(prop, x,y,z-1, true, true, false)
 	local player = GetPlayerPed(-1)
@@ -271,26 +298,30 @@ function fuel(x,y,z)
 			local playerpos = GetEntityCoords(player)
 			local disttocoord = #(vector3(fuelCoords.x,fuelCoords.y,fuelCoords.z)-vector3(playerpos.x,playerpos.y,playerpos.z))
 			if disttocoord <= 3 then
-				DrawText3Ds(fuelCoords.x,fuelCoords.y,fuelCoords.z, _U'pick_jerry')
+				DrawText3Ds(fuelCoords.x,fuelCoords.y,fuelCoords.z, '[~g~E~w~] - Pick up jerry can')	
 				if IsControlJustPressed(1, 51) then
-					TaskTurnPedToFaceEntity(player, fuelSpawn, 3000)
-					FreezeEntityPosition(player, true)
-					if Config.progBar then
-						exports['progressBars']:startUI(1000, _U'picking_jerry')
-					end
-					DoScreenFadeOut(1000)
-					Citizen.Wait(1000)
-					DeleteEntity(fuelSpawn)
-					Citizen.Wait(500)
-					DoScreenFadeIn(2000)
-					GiveWeaponToPed(player, jerrycan, 0, false, true)
-					FreezeEntityPosition(player, false)
-					if Config.useMythic then
-						exports['mythic_notify']:DoLongHudText('inform', _U'fill_plane')
-					end
-					plane(fuel)
-					fueling = false
-					dodo = true
+					QBCore.Functions.Progressbar("jerry_pickup", "Picking up jerry can..", math.random(5000, 10000), false, true, {
+						disableMovement = true,
+						disableCarMovement = true,
+						disableMouse = false,
+						disableCombat = true,
+					}, {
+						animDict = "random@mugging4",
+						anim = "struggle_loop_b_thief",
+						flags = 16,
+					}, {}, {}, function() -- Done
+						DeleteEntity(fuelSpawn)
+						TriggerServerEvent('coke:GiveJerry')
+						TriggerEvent("inventory:client:ItemBox", QBCore.Shared.Items['jerry_can'], "add")
+						FreezeEntityPosition(player, false)
+						TriggerEvent('QBCore:Notify', "Fuel the plane!")
+						plane(fuel)
+						fueling = false
+						dodo = true
+					end, function() -- Cancel
+						StopAnimTask(GetPlayerPed(-1), "random@mugging4", "struggle_loop_b_thief", 1.0)
+						QBCore.Functions.Notify("Canceled..", "error")
+					end)
 				end
 			else
 				sleep = 1500
@@ -308,27 +339,43 @@ function plane(fuel)
 			local playerpos = GetEntityCoords(player)
 			local disttocoord = #(vector3(location.parking.x,location.parking.y,location.parking.z)-vector3(playerpos.x,playerpos.y,playerpos.z))
 			if disttocoord <= 5 then
-				DrawText3Ds(location.parking.x,location.parking.y,location.parking.z, _U'refuel')
+				DrawText3Ds(location.parking.x,location.parking.y,location.parking.z, '[~g~E~w~] Refuel the plane')
 				DrawMarker(27, location.parking.x,location.parking.y,location.parking.z-0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 0.2, 3, 252, 152, 100, false, true, 2, false, false, false, false)
 				if IsControlJustPressed(1, 51) then
-					dodo = false
-					delivering = true
-					SetCurrentPedWeapon(player, jerrycan, true)
-					TaskTurnPedToFaceEntity(player, airplane, 20000)
-					FreezeEntityPosition(player, true)
-					playAnim("weapon@w_sp_jerrycan", "fire", 20000)
-					if Config.progBar then
-						exports['progressBars']:startUI(20000, _U'refueling')
-					end
-					Citizen.Wait(20000)
-					if Config.useMythic then
-						exports['mythic_notify']:DoLongHudText('success', _U'finish_refuel')
-					end
-					RemoveWeaponFromPed(player, jerrycan)
-					FreezeEntityPosition(airplane, false)
-					FreezeEntityPosition(player, false)
-					ClearPedTasksImmediately(player)
-					delivery()
+					QBCore.Functions.TriggerCallback('coke:jerrycheck', function(success)
+						if success then
+							TriggerServerEvent('coke:RemoveJerry')
+							QBCore.Functions.Progressbar("plane_refuel", "You are fueling the plane..", math.random(5000, 10000), false, true, {
+								disableMovement = true,
+								disableCarMovement = true,
+								disableMouse = false,
+								disableCombat = true,
+							}, {
+								animDict = "timetable@gardener@filling_can",
+								anim = "gar_ig_5_filling_can",
+								flags = 16,
+							}, {}, {}, function() -- Done
+								dodo = false
+								delivering = true
+								QBCore.Functions.Notify("Finished refueling!", "success")
+								TriggerEvent("vehiclekeys:client:SetOwner", QBCore.Functions.GetPlate(veh))
+								TriggerServerEvent('coke:updateTable', false)
+								TriggerEvent("inventory:client:ItemBox", QBCore.Shared.Items['jerry_can'], "remove")
+								FreezeEntityPosition(airplane, false)
+								SetVehicleDoorsLocked(airplane, 0)
+								FreezeEntityPosition(player, false)
+								ClearPedTasksImmediately(player)
+								delivery()
+								starter = false
+							end, function() -- Cancel
+								StopAnimTask(GetPlayerPed(-1), "timetable@gardener@filling_can", "gar_ig_5_filling_can", 1.0)
+								QBCore.Functions.Notify("Canceled..", "error")
+							end)					
+						else
+							isProcessing = false
+							QBCore.Functions.Notify("You need a jerry can..", "error")
+						end
+					end)
 				end
 			else
 				sleep = 1500
@@ -338,17 +385,19 @@ function plane(fuel)
 	end)
 end
 
+
 Citizen.CreateThread(function()
 	checkPlane = true
 	while checkPlane do
 		sleep = 100 
 		if DoesEntityExist(airplane) then
 			if GetVehicleEngineHealth(airplane) < 0 then
-				if Config.useMythic then
-					exports['mythic_notify']:DoLongHudText('error', _U'fail')
-				end
+				QBCore.Functions.Notify("The vehicle was damaged.. You failed the run", "error")
 				TriggerServerEvent('coke:updateTable', false)
 				checkPlane = false
+				inUse = false
+				RemoveBlip(blip)
+				SetBlipRoute(blip, false)
 			end
 		else
 			sleep = 3000
@@ -358,10 +407,7 @@ Citizen.CreateThread(function()
 end)
 
 function delivery()
-	if Config.useMythic then
-		exports['mythic_notify']:DoLongHudText('inform', _U'deliver')
-	end
-	local pickup = GetHashKey("prop_barrel_float_1")
+	local pickup = GetHashKey("prop_drop_armscrate_01")
 	blip = AddBlipForCoord(location.delivery.x,location.delivery.y,location.delivery.z)
 	SetBlipRoute(blip, true)
 	RequestModel(pickup)
@@ -378,19 +424,26 @@ function delivery()
 			if disttocoord <= 20 then
 				RemoveBlip(blip)
 				SetBlipRoute(blip, false)
-				DrawText3Ds(location.delivery.x,location.delivery.y,location.delivery.z-1, _U'pick_deliv')
+				DrawText3Ds(location.delivery.x,location.delivery.y,location.delivery.z-1, '[~g~E~w~] - Pickup delivery')	
 				if IsControlJustPressed(1, 51) then
-					delivering = false
-					if Config.progBar then
-						exports['progressBars']:startUI(2000, _U'picking_deliv')
-					end
-					Citizen.Wait(2000)
-					if Config.useMythic then
-						exports['mythic_notify']:DoLongHudText('success', _U'picked_deliv')
-					end
-					DeleteEntity(pickupSpawn)
-					Citizen.Wait(2000)
-					final()
+					QBCore.Functions.Progressbar("package_pickup", "Picking up package..", math.random(5000, 10000), false, true, {
+						disableMovement = true,
+						disableCarMovement = true,
+						disableMouse = false,
+						disableCombat = true,
+					}, {
+						animDict = "weapon@w_sp_jerrycanr",
+						anim = "fire",
+						flags = 16,
+					}, {}, {}, function() -- Done
+						delivering = false
+						QBCore.Functions.Notify("You picked up a delivery!", "success")
+						DeleteEntity(pickupSpawn)
+						final()
+					end, function() -- Cancel
+						StopAnimTask(GetPlayerPed(-1), "weapon@w_sp_jerrycan", "fire", 1.0)
+						QBCore.Functions.Notify("Canceled..", "error")
+					end)
 				end
 			else
 				sleep = 1500
@@ -401,9 +454,7 @@ function delivery()
 end
 
 function final()
-	if Config.useMythic then
-		exports['mythic_notify']:DoLongHudText('inform', _U'deliv_plane')
-	end
+	QBCore.Functions.Notify("Deliver the plane back to the airfield!", "success")
 	blip = AddBlipForCoord(location.hangar.x,location.hangar.y,location.hangar.z)
 	SetBlipRoute(blip, true)
 	hangar = true
@@ -416,25 +467,35 @@ function final()
 			if disttocoord <= 5 then
 				RemoveBlip(blip)
 				SetBlipRoute(blip, false)
-				DrawText3Ds(location.hangar.x,location.hangar.y,location.hangar.z-1, _U'park_plane')
+				DrawText3Ds(location.hangar.x,location.hangar.y,location.hangar.z-1, '[~g~E~w~] - Park Plane')	
 				DrawMarker(27, location.hangar.x,location.hangar.y,location.hangar.z-0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 3, 252, 152, 100, false, true, 2, false, false, false, false)
 				if IsControlJustPressed(1, 51) then
 					hangar = false
 					FreezeEntityPosition(airplane, true)
-					if Config.progBar then
-						exports['progressBars']:startUI(2000, _U'leaving_key')
-					end
-					Citizen.Wait(2000)
-					TriggerServerEvent('coke:GiveItem')
-					TaskLeaveVehicle(player, airplane, 0)
-					SetVehicleDoorsLocked(airplane, 2)
-					Citizen.Wait(30000)
-					DeleteEntity(airplane)	
-					if Config.useCD then		
-						cooldown()
-					else
-						TriggerServerEvent('coke:updateTable', false)
-					end
+					QBCore.Functions.Progressbar("park_plane", "Storing the plane..", math.random(5000, 10000), false, true, {
+						disableMovement = true,
+						disableCarMovement = true,
+						disableMouse = false,
+						disableCombat = true,
+					}, {
+						animDict = "weapon@w_sp_jerrycanr",
+						anim = "fire",
+						flags = 16,
+					}, {}, {}, function() -- Done
+						TriggerServerEvent('coke:GiveItem')
+						TriggerEvent("inventory:client:ItemBox", QBCore.Shared.Items['coke_brick'], "add")
+						TaskLeaveVehicle(player, airplane, 0)
+						SetVehicleDoorsLocked(airplane, 2)
+						DeleteEntity(airplane)	
+						if Config.useCD then		
+							cooldown()
+						else
+							TriggerServerEvent('coke:updateTable', false)
+						end
+					end, function() -- Cancel
+						StopAnimTask(GetPlayerPed(-1), "weapon@w_sp_jerrycan", "fire", 1.0)
+						QBCore.Functions.Notify("Canceled..", "error")
+					end)
 				end
 			else
 				sleep = 1500
@@ -444,49 +505,74 @@ function final()
 	end)
 end
 
-Citizen.CreateThread(function()
-	local sleep
-	while not process do
-		Citizen.Wait(0)
-	end
-	while true do
-		sleep = 5
-		local player = GetPlayerPed(-1)
-		local playercoords = GetEntityCoords(player)
-		local dist = #(vector3(playercoords.x,playercoords.y,playercoords.z)-vector3(process.x,process.y,process.z))
-		if dist <= 3 and not isProcessing then
-			sleep = 5
-			DrawText3Ds(process.x, process.y, process.z, _U'break_coke')			
-			if IsControlJustPressed(1, 51) then		
-				isProcessing = true
-				ESX.TriggerServerCallback('coke:process', function(success)
-					if success then					
-						processing()
-					else
-						isProcessing = false
-					end
-				end)
-			end
-		else
-			sleep = 1500
-		end
-		Citizen.Wait(sleep)
-	end
+CreateThread(function()
+	Citizen.Wait(1)
+	local tablecoordsx = Config.TableProcessLocation['x']
+	local tablecoordsy = Config.TableProcessLocation['y']
+	local tablecoordsz = Config.TableProcessLocation['z']
+	local table = CreateObject(-2002254222, tablecoordsx, tablecoordsy, tablecoordsz, true, true, true)
+	SetEntityHeading(table, Config.TableProcessLocation['heading'])
+	FreezeEntityPosition(table, true)
 end)
+
+
+Citizen.CreateThread(function()
+	
+    local sleep
+	Citizen.Wait(5)
+    while true do
+        sleep = 5
+        local player = PlayerPedId()
+        local playercoords = GetEntityCoords(player)
+        local tablecoordsx = Config.TableProcessLocation['x']
+        local tablecoordsy = Config.TableProcessLocation['y']
+        local tablecoordsz = Config.TableProcessLocation['z']
+        local dist = #(vector3(playercoords.x,playercoords.y,playercoords.z)-vector3(tablecoordsx,tablecoordsy,tablecoordsz))
+        if dist <= 3 and not isProcessing then
+            sleep = 5
+			exports['qb-core']:DrawText('[E] To Break Down Brick')
+            if IsControlJustPressed(1, 51) then        
+                isProcessing = true
+                QBCore.Functions.TriggerCallback('QBCore:HasItem', function(result)
+                    if result then
+                        processing()
+                    else
+                        QBCore.Functions.Notify("You are missing something", "error")
+                        isProcessing = false
+                    end
+                end, itemsTable)
+            end
+        else
+            sleep = 1500
+			exports['qb-core']:HideText()
+        end
+        Citizen.Wait(sleep)
+    end
+end)
+
 
 function processing()
 	local player = GetPlayerPed(-1)
 	SetEntityCoords(player, process.x,process.y,process.z-1, 0.0, 0.0, 0.0, false)
-	SetEntityHeading(player, 232.84)
+	SetEntityHeading(player, 51.734)
 	FreezeEntityPosition(player, true)
-	if Config.progBar then
-		exports['progressBars']:startUI(6000, _U'breaking_coke')
-	end
-	playAnim("anim@amb@clubhouse@tutorial@bkr_tut_ig3@", "machinic_loop_mechandplayer", 6000)
-	Citizen.Wait(6000)
-	FreezeEntityPosition(player, false)
-	TriggerServerEvent('coke:processed')
-	isProcessing = false
+	playAnim("anim@amb@clubhouse@tutorial@bkr_tut_ig3@", "machinic_loop_mechandplayer", 30000)
+
+	QBCore.Functions.Progressbar("coke-", "Breaking down the coke..", 30000, false, true, {
+		disableMovement = true,
+		disableCarMovement = true,
+		disableMouse = false,
+		disableCombat = true,
+	}, {}, {}, {}, function() -- Done
+		FreezeEntityPosition(player, false)
+		TriggerServerEvent('coke:processed')
+		isProcessing = false
+	end, function() -- Cancel
+		isProcessing = false
+		ClearPedTasksImmediately(player)
+		FreezeEntityPosition(player, false)
+	end)
+
 end
 
 function cooldown()
@@ -526,6 +612,7 @@ function DrawText3Ds(x,y,z, text)
     local factor = (string.len(text)) / 370
     DrawRect(_x,_y+0.0125, 0.015+ factor, 0.03, 41, 11, 41, 68)
 end
+
 
 -- (Optional) Shows your coords, useful if you want to add new locations.
 
