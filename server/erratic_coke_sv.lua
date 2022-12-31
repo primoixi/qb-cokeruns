@@ -1,71 +1,113 @@
-ESX = nil
+QBCore = nil
+local QBCore = exports['qb-core']:GetCoreObject()
 
-TriggerEvent('esx:getSharedObject', function(obj) ESX = obj end)
+TriggerEvent('QBCore:GetObject', function(obj) QBCore = obj end)
 
-local hiddenprocess = vector3(-331.7995, -2444.753, 7.358099) -- Change this to whatever location you want. This is server side to prevent people from dumping the coords
-local hiddenstart = vector3(-480.7245, 6266.324, 13.63469) -- Change this to whatever location you want. This is server side to prevent people from dumping the coords
+local hiddenprocess = vector3(508.52, -2750.45, 6.25) -- Change this to whatever location you want. This is server side to prevent people from dumping the coords
+local hiddenstart = vector3(-2176.32, 5232.61, 17.74) -- Change this to whatever location you want. This is server side to prevent people from dumping the coords
+
 
 RegisterNetEvent('coke:updateTable')
 AddEventHandler('coke:updateTable', function(bool)
     TriggerClientEvent('coke:syncTable', -1, bool)
 end)
 
-ESX.RegisterUsableItem('coke', function(source)
-	local xPlayer = ESX.GetPlayerFromId(source)
-	xPlayer.removeInventoryItem('coke', 1)
-	TriggerClientEvent('coke:onUse', source)
-end)
+-- Hidden Coords to prevent cheaters from finding hidden locations
 
-ESX.RegisterServerCallback('coke:processcoords', function(source, cb)
+QBCore.Functions.CreateCallback('coke:processcoords', function(source, cb)
     cb(hiddenprocess)
 end)
 
-ESX.RegisterServerCallback('coke:startcoords', function(source, cb)
+QBCore.Functions.CreateCallback('coke:startcoords', function(source, cb)
     cb(hiddenstart)
 end)
 
-ESX.RegisterServerCallback('coke:pay', function(source, cb)
-	local _source = source
-	local xPlayer = ESX.GetPlayerFromId(_source)
+
+QBCore.Functions.CreateCallback('coke:process', function(source, cb)
+    local Player = QBCore.Functions.GetPlayer(source)
+    local Item = Player.Functions.GetItemByName("coke_brick")
+
+    if Item ~= nil then
+        cb(true)
+    else
+        cb(false)
+    end
+end)
+
+QBCore.Functions.CreateCallback('coke:jerrycheck', function(source, cb)
+    local Player = QBCore.Functions.GetPlayer(source)
+    local Item = Player.Functions.GetItemByName("jerry_can")
+
+    if Item ~= nil then
+        cb(true)
+    else
+        cb(false)
+    end
+end)
+
+
+QBCore.Functions.CreateCallback('coke:pay', function(source, cb)
+	local src = source
+	local Player = QBCore.Functions.GetPlayer(src)
 	local price = Config.price
-	local check = xPlayer.getMoney()
+	local check = Player.PlayerData.money.cash
 	if check >= price then
-		xPlayer.removeMoney(price)
+		Player.Functions.RemoveMoney('cash', price, "cash-removed"..Player.PlayerData.citizenid)
     	cb(true)
     else
-      if Config.useMythic then
-    	 TriggerClientEvent('mythic_notify:client:SendAlert:long', _source, { type = 'error', text = _U'no_money'})
-      end
     	cb(false)
+    end
+end)
+
+QBCore.Functions.CreateUseableItem("coke_small_brick", function(source, item)
+    local Player = QBCore.Functions.GetPlayer(source)
+	if Player.Functions.RemoveItem(item.name, 1, item.slot) then
+        Player.Functions.AddItem("cokebaggy", math.random(5, 10))
     end
 end)
 
 RegisterServerEvent("coke:processed")
 AddEventHandler("coke:processed", function(x,y,z)
-  	local _source = source
-  	local xPlayer = ESX.GetPlayerFromId(_source)
-  	local pick = Config.randBrick
-	xPlayer.removeInventoryItem('cokebrick', Config.takeBrick)
-	xPlayer.addInventoryItem('coke', pick)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+
+    Player.Functions.AddItem("cokebaggy", math.random(12, 20))
+    TriggerClientEvent('inventory:client:ItemBox', src, QBCore.Shared.Items["cokebaggy"], 'add')
 end)
 
-ESX.RegisterServerCallback('coke:process', function(source, cb)
-	local _source = source
-	local xPlayer = ESX.GetPlayerFromId(_source)
-	local check = xPlayer.getInventoryItem('cokebrick').count
-	if check >= 1 then
-    	cb(true)
-    else
-      if Config.useMythic then
-    	 TriggerClientEvent('mythic_notify:client:SendAlert:long', _source, { type = 'error', text = _U'no_brick'})
-      end
-    	cb(false)
-    end
-end)
+
+-- Gives item upon delivery
 
 RegisterServerEvent("coke:GiveItem")
 AddEventHandler("coke:GiveItem", function()
-  	local _source = source
-  	local xPlayer = ESX.GetPlayerFromId(_source)
-    xPlayer.addInventoryItem('cokebrick', 2)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+      Player.Functions.AddItem('coke_brick', 2)
+end)
+
+-- Removes coke brick after processing
+
+RegisterServerEvent("coke:RemoveItem")
+AddEventHandler("coke:RemoveItem", function()
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+      Player.Functions.RemoveItem('coke_brick', 1)
+end)
+
+--Gives jerry after completing the task
+
+RegisterServerEvent("coke:GiveJerry")
+AddEventHandler("coke:GiveJerry", function()
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+      Player.Functions.AddItem('jerry_can', 1)
+end)
+
+--Removes Jerry Can after fueling the plane
+
+RegisterServerEvent("coke:RemoveJerry")
+AddEventHandler("coke:RemoveJerry", function()
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+      Player.Functions.RemoveItem('jerry_can', 1)
 end)
